@@ -16,29 +16,22 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # === Android SDK を対話なしで準備（必ず通す） ===
-      - name: Install Android cmdline-tools & SDK packages (no prompts, no fail)
+      # === Android SDK を対話なしで準備（失敗無視＋リトライ） ===
+      - name: Install Android cmdline-tools & SDK packages (robust)
         shell: bash
         run: |
-          set +e  # このステップ内では失敗で止めない
+          set +e
 
-          # SDK ルートをジョブ全体に共有
           echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_HOME=$HOME/android-sdk"      >> $GITHUB_ENV
-
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
+
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           cd "$ANDROID_SDK_ROOT"
-
-          # 1) cmdline-tools を取得・配置
           curl -fsSLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q cmdline-tools.zip -d cmdline-tools
-          if [ -d cmdline-tools/cmdline-tools/bin ]; then
-            src="cmdline-tools/cmdline-tools"
-          else
-            src="cmdline-tools"
-          fi
+          if [ -d cmdline-tools/cmdline-tools/bin ]; then src="cmdline-tools/cmdline-tools"; else src="cmdline-tools"; fi
           mkdir -p cmdline-tools/latest
           mv "$src"/* cmdline-tools/latest/ 2>/dev/null || true
           rm -rf cmdline-tools/cmdline-tools cmdline-tools.zip || true
@@ -48,7 +41,7 @@ jobs:
 
           SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
-          # 2) ライセンスを事前承認（ハッシュを配置：対話不要・Broken pipe回避）
+          # 事前ライセンス（対話なし）
           mkdir -p "$ANDROID_SDK_ROOT/licenses"
           cat > "$ANDROID_SDK_ROOT/licenses/android-sdk-license" <<'EOF'
           d56f5187479451eabf01fb78af6dfcb131a6481e
@@ -58,24 +51,32 @@ jobs:
           84831b9409646a918e30573bab4c9c91346d8abd
           EOF
 
-          # 3) 必須パッケージを順にインストール（各々リトライ & 失敗無視）
-          for p in "platform-tools" "platforms;android-33" "build-tools;33.0.2"; do
+          # SDK34 一式（各2回リトライ、失敗無視）
+          for p in "platform-tools" "platforms;android-34" "build-tools;34.0.0"; do
             "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || \
             "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || true
           done
 
-          # 4) ログ確認だけ（無くても次で失敗するのでOK）
-          ls -l "$ANDROID_SDK_ROOT/platforms/android-33"/android.jar 2>/dev/null || true
-          ls -l "$ANDROID_SDK_ROOT/build-tools/33.0.2"/aapt2       2>/dev/null || true
+          # 簡易確認（無くても次で落ちるから true 付き）
+          ls -l "$ANDROID_SDK_ROOT/platforms/android-34"/android.jar 2>/dev/null || true
+          ls -l "$ANDROID_SDK_ROOT/build-tools/34.0.0"/aapt2       2>/dev/null || true
 
-      # === ビルド（Gradle公式アクション） ===
+      # === Gradle 実行（詳細ログON） ===
       - name: Build with Gradle
         uses: gradle/gradle-build-action@v3
         with:
           gradle-version: 8.7
-          arguments: :app:assembleDebug --stacktrace
+          arguments: >
+            :app:assembleDebug
+            --stacktrace
+            --warning-mode all
+            --info
+        env:
+          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
       - name: Upload APK
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: app-debug
