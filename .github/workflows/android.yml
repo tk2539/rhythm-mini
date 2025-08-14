@@ -16,12 +16,11 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # === Android SDK を対話なしで準備（失敗無視＋リトライ） ===
+      # Android SDK を対話なしで用意（失敗無視＋リトライ付き）
       - name: Install Android cmdline-tools & SDK packages (robust)
         shell: bash
         run: |
           set +e
-
           echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_HOME=$HOME/android-sdk"      >> $GITHUB_ENV
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
@@ -41,7 +40,7 @@ jobs:
 
           SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
-          # 事前ライセンス（対話なし）
+          # 事前ライセンス配置（対話なし）
           mkdir -p "$ANDROID_SDK_ROOT/licenses"
           cat > "$ANDROID_SDK_ROOT/licenses/android-sdk-license" <<'EOF'
           d56f5187479451eabf01fb78af6dfcb131a6481e
@@ -51,17 +50,21 @@ jobs:
           84831b9409646a918e30573bab4c9c91346d8abd
           EOF
 
-          # SDK34 一式（各2回リトライ、失敗無視）
+          # 必須パッケージ（各2回トライ／失敗無視）
           for p in "platform-tools" "platforms;android-34" "build-tools;34.0.0"; do
             "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || \
             "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || true
           done
 
-          # 簡易確認（無くても次で落ちるから true 付き）
-          ls -l "$ANDROID_SDK_ROOT/platforms/android-34"/android.jar 2>/dev/null || true
-          ls -l "$ANDROID_SDK_ROOT/build-tools/34.0.0"/aapt2       2>/dev/null || true
+      # ←★ これを追加：Gradle用に sdk.dir を明示
+      - name: Write local.properties (sdk.dir)
+        shell: bash
+        run: |
+          echo "sdk.dir=$HOME/android-sdk" > local.properties
+          echo "Wrote local.properties:"
+          cat local.properties
 
-      # === Gradle 実行（詳細ログON） ===
+      # Gradle 実行（詳細ログON）
       - name: Build with Gradle
         uses: gradle/gradle-build-action@v3
         with:
@@ -71,9 +74,6 @@ jobs:
             --stacktrace
             --warning-mode all
             --info
-        env:
-          ANDROID_SDK_ROOT: ${{ env.ANDROID_SDK_ROOT }}
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
 
       - name: Upload APK
         if: success()
