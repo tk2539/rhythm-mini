@@ -16,7 +16,6 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # Android SDK を対話なしで用意（失敗無視＋リトライ付き）
       - name: Install Android cmdline-tools & SDK packages (robust)
         shell: bash
         run: |
@@ -40,7 +39,7 @@ jobs:
 
           SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
-          # 事前ライセンス配置（対話なし）
+          # 事前ライセンス（対話なし）
           mkdir -p "$ANDROID_SDK_ROOT/licenses"
           cat > "$ANDROID_SDK_ROOT/licenses/android-sdk-license" <<'EOF'
           d56f5187479451eabf01fb78af6dfcb131a6481e
@@ -50,30 +49,52 @@ jobs:
           84831b9409646a918e30573bab4c9c91346d8abd
           EOF
 
-          # 必須パッケージ（各2回トライ／失敗無視）
           for p in "platform-tools" "platforms;android-34" "build-tools;34.0.0"; do
             "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || \
             "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || true
           done
 
-      # ←★ これを追加：Gradle用に sdk.dir を明示
       - name: Write local.properties (sdk.dir)
         shell: bash
         run: |
           echo "sdk.dir=$HOME/android-sdk" > local.properties
-          echo "Wrote local.properties:"
+          echo "local.properties written:"
           cat local.properties
 
-      # Gradle 実行（詳細ログON）
-      - name: Build with Gradle
-        uses: gradle/gradle-build-action@v3
+      - name: Show project tree (sanity check)
+        shell: bash
+        run: |
+          echo "==== Project tree (top) ===="
+          ls -la
+          echo "==== App java sources ===="
+          ls -la app/src/main/java || true
+          find app/src/main/java -type f || true
+          echo "==== Manifest ===="
+          sed -n '1,120p' app/src/main/AndroidManifest.xml || true
+          echo "==== Gradle files ===="
+          sed -n '1,120p' settings.gradle || true
+          sed -n '1,80p'  build.gradle    || true
+          sed -n '1,160p' app/build.gradle || true
+
+      - name: Gradle version
+        shell: bash
+        run: |
+          ./gradlew --version || true
+
+      # Gradle 実行ログを必ず保存して原因を特定できるように
+      - name: Build with Gradle (capture log)
+        shell: bash
+        run: |
+          set -e
+          ./gradlew :app:assembleDebug --stacktrace --warning-mode all --info 2>&1 | tee build.log
+          ls -l app/build/outputs/apk/debug || true
+
+      - name: Upload Gradle log
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          gradle-version: 8.7
-          arguments: >
-            :app:assembleDebug
-            --stacktrace
-            --warning-mode all
-            --info
+          name: gradle-build-log
+          path: build.log
 
       - name: Upload APK
         if: success()
