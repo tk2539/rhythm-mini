@@ -1,11 +1,11 @@
-plugins { id 'com.android.application' }
 android {
   namespace 'com.example.rhythmmini'
-  compileSdk 33
+  compileSdk 34
+
   defaultConfig {
     applicationId "com.example.rhythmmini"
     minSdk 24
-    targetSdk 33
+    targetSdk 34
     versionCode 1
     versionName "1.0"
   }
@@ -20,4 +20,3 @@ android {
     targetCompatibility JavaVersion.VERSION_17
   }
 }
-dependencies { }
