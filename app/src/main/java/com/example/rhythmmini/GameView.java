@@ -16,6 +16,7 @@ import java.util.Random;
 
 public class GameView extends View {
 
+    // ========= 描画・ゲーム状態 =========
     private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final List<Note> notes = new ArrayList<>();
     private final Random rnd = new Random();
@@ -23,87 +24,105 @@ public class GameView extends View {
     private int score = 0;
     private int miss = 0;
 
-    // レーン/ノーツ寸法
-    private int laneCount = 4;
-    private float laneWidth;
-    private float noteW, noteH;
-    private float hitLineY; // 画面下から少し上
+    // ========= レイアウト関連 =========
+    private final int laneCount = 4;
+    private float laneWidth = 0f;
+    private float noteW = 0f, noteH = 0f;
+    private float hitLineY = 0f;
+    private boolean seeded = false; // 初回ノーツ投入済みフラグ
 
-    // 判定
-    private float hitWindowPx;
-    private float flickDistancePx;
-    private long flickTimeMs;
+    // ========= 判定関連 =========
+    private float hitWindowPx;      // 判定許容（中心距離）
+    private float flickDistancePx;  // フリック最小距離
+    private long  flickTimeMs;      // フリック最長時間
 
-    // 入力追跡
+    // ========= 入力追跡 =========
     private float downX, downY;
-    private long downTime;
+    private long  downTime;
     private boolean isDown;
 
+    // ========== コンストラクタ ==========
+    // Activity から new GameView(this) で呼ばれる想定
+    public GameView(Context ctx) {
+        this(ctx, null);
+    }
+
+    // XML/スタイル対応の本体コンストラクタ
     public GameView(Context ctx, AttributeSet attrs) {
         super(ctx, attrs);
         setFocusable(true);
         setClickable(true);
 
         DisplayMetrics dm = getResources().getDisplayMetrics();
-        hitWindowPx = dp(42, dm);          // 判定許容
-        flickDistancePx = dp(80, dm);      // フリック閾値
-        flickTimeMs = 220;                 // フリックは素早く
+        hitWindowPx     = dp(42, dm);
+        flickDistancePx = dp(80, dm);
+        flickTimeMs     = 220;
 
-        // 初期ノーツ少量
-        post(this::seedNotes);
-        // ゲームループ
-        post(frameRunnable);
+        // ゲームループ起動
+        post(frameLoop);
     }
 
-    private float dp(float v, DisplayMetrics dm) { return v * dm.density; }
+    // 端末サイズが確定したら寸法を計算し、初回ノーツを投入
+    @Override protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+        super.onSizeChanged(w, h, oldw, oldh);
 
-    private final Runnable frameRunnable = new Runnable() {
+        laneWidth = w / (float) laneCount;
+        noteW     = laneWidth * 0.65f;
+        noteH     = dp(26, getResources().getDisplayMetrics());
+        hitLineY  = h - dp(120, getResources().getDisplayMetrics());
+
+        if (!seeded && w > 0 && h > 0) {
+            seedNotes();
+            seeded = true;
+        }
+    }
+
+    // 1フレームごとに更新＆再描画
+    private final Runnable frameLoop = new Runnable() {
         @Override public void run() {
             update();
             invalidate();
-            postDelayed(this, 16); // ~60fps
+            postDelayed(this, 16); // 約60fps
         }
     };
 
+    // 初期ノーツばら撒き
     private void seedNotes() {
-        // ある程度の数を上の方にばら撒く
         for (int i = 0; i < 24; i++) {
-            spawnNote(-dp(80, getResources().getDisplayMetrics()) * i);
+            float gap = dp(80, getResources().getDisplayMetrics());
+            spawnNote(-gap * (i + 1));
         }
     }
 
+    // ノーツ生成（タイプ分布：NORMAL 70% / CRITICAL 20% / FLICK 10%）
     private void spawnNote(float startY) {
         int lane = rnd.nextInt(laneCount);
 
-        // タイプ分布：Normal 70% / Critical 20% / Flick 10%
-        int r = rnd.nextInt(100);
         Note.Type type;
         int color;
-        if (r < 10) { // FLICK
+        int r = rnd.nextInt(100);
+        if (r < 10) { // FLICK（オレンジ）
             type = Note.Type.FLICK;
-            color = Color.rgb(255, 140, 0); // オレンジ
-        } else if (r < 30) { // CRITICAL
+            color = Color.rgb(255, 140, 0);
+        } else if (r < 30) { // CRITICAL（黄色）
             type = Note.Type.CRITICAL;
             color = Color.YELLOW;
-        } else {
+        } else { // NORMAL（青）
             type = Note.Type.NORMAL;
-            color = Color.rgb(90, 160, 255); // ブルー
+            color = Color.rgb(90, 160, 255);
         }
 
-        float speed = dp(3.5f, getResources().getDisplayMetrics()) + rnd.nextFloat() * dp(1.5f, getResources().getDisplayMetrics());
-        notes.add(new Note(lane, startY, noteW, noteH, speed, type, color));
+        float spd = dp(3.5f, getResources().getDisplayMetrics())
+                  + rnd.nextFloat() * dp(1.5f, getResources().getDisplayMetrics());
+
+        notes.add(new Note(lane, startY, noteW, noteH, spd, type, color));
     }
 
+    // 毎フレーム更新
     private void update() {
-        // 寸法が未算出なら算出
-        if (laneWidth == 0) {
-            laneWidth = getWidth() / (float) laneCount;
-            noteW = laneWidth * 0.65f;
-            noteH = dp(26, getResources().getDisplayMetrics());
-            hitLineY = getHeight() - dp(120, getResources().getDisplayMetrics());
-        }
+        if (laneWidth <= 0f) return; // サイズ未確定なら待機
 
-        // 落下＆ロスト
+        // 落下＆画面外ロスト
         Iterator<Note> it = notes.iterator();
         while (it.hasNext()) {
             Note n = it.next();
@@ -114,15 +133,18 @@ public class GameView extends View {
             }
         }
 
-        // 足りなければ追加
+        // ストック補充
         while (notes.size() < 24) {
-            float top = -dp(200, getResources().getDisplayMetrics()) - rnd.nextFloat() * dp(500, getResources().getDisplayMetrics());
+            float top = -dp(200, getResources().getDisplayMetrics())
+                      - rnd.nextFloat() * dp(500, getResources().getDisplayMetrics());
             spawnNote(top);
         }
     }
 
+    // 描画
     @Override protected void onDraw(Canvas c) {
         super.onDraw(c);
+
         // 背景
         c.drawColor(Color.BLACK);
 
@@ -133,6 +155,7 @@ public class GameView extends View {
             float x = i * laneWidth;
             c.drawLine(x, 0, x, getHeight(), paint);
         }
+
         // ヒットライン
         paint.setColor(Color.GRAY);
         c.drawLine(0, hitLineY, getWidth(), hitLineY, paint);
@@ -145,9 +168,13 @@ public class GameView extends View {
         // スコア表示
         paint.setColor(Color.WHITE);
         paint.setTextSize(dp(18, getResources().getDisplayMetrics()));
-        c.drawText("Score:" + score + "  Miss:" + miss, dp(12, getResources().getDisplayMetrics()), dp(28, getResources().getDisplayMetrics()), paint);
+        c.drawText("Score:" + score + "  Miss:" + miss,
+                dp(12, getResources().getDisplayMetrics()),
+                dp(28, getResources().getDisplayMetrics()),
+                paint);
     }
 
+    // 入力処理（タップ＆フリック）
     @Override public boolean onTouchEvent(MotionEvent e) {
         switch (e.getActionMasked()) {
             case MotionEvent.ACTION_DOWN:
@@ -165,7 +192,7 @@ public class GameView extends View {
                     long dt = System.currentTimeMillis() - downTime;
                     float dx = upX - downX;
                     float dy = upY - downY;
-                    float dist = (float)Math.hypot(dx, dy);
+                    float dist = (float) Math.hypot(dx, dy);
                     boolean isFlickGesture = (dt <= flickTimeMs) && (dist >= flickDistancePx);
 
                     int lane = (int) Math.floor(upX / laneWidth);
@@ -180,8 +207,8 @@ public class GameView extends View {
         return super.onTouchEvent(e);
     }
 
+    // ヒット判定・スコア更新
     private void handleHit(int lane, boolean isFlickGesture) {
-        // lane内でヒットウィンドウにいる最も近いノーツを探す
         Note target = null;
         float bestDist = Float.MAX_VALUE;
 
@@ -189,7 +216,7 @@ public class GameView extends View {
             if (n.lane != lane) continue;
             if (!n.isHittable(hitLineY, hitWindowPx)) continue;
 
-            float d = Math.abs((n.y + noteH/2f) - hitLineY);
+            float d = Math.abs((n.y + noteH / 2f) - hitLineY);
             if (d < bestDist) {
                 bestDist = d;
                 target = n;
@@ -197,7 +224,7 @@ public class GameView extends View {
         }
 
         if (target == null) {
-            // 近くに無い → ミスとして扱うか無視するか。ここは無視にしてもOK
+            // 近くに無い → ミス（または無視でもOK）
             miss++;
             return;
         }
@@ -205,16 +232,20 @@ public class GameView extends View {
         // 種類別の入力要求
         if (target.type == Note.Type.FLICK) {
             if (!isFlickGesture) {
-                // フリックじゃなかった → ミスにして消さない（再挑戦可）
+                // フリックでない → 失敗（ノーツは残す）
                 miss++;
                 return;
             }
-        } else {
-            // NORMAL/CRITICAL はタップ想定：フリックでもOKにするなら何もしない
         }
+        // NORMAL / CRITICAL はタップでOK（フリックでも可）
 
         // ヒット成功
         score += target.scoreValue();
         notes.remove(target);
+    }
+
+    // dp → px
+    private float dp(float v, DisplayMetrics dm) {
+        return v * dm.density;
     }
 }
