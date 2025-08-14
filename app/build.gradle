@@ -1,6 +1,6 @@
 // app/build.gradle
 plugins {
-  id 'com.android.application' version '8.5.0'
+  id 'com.android.application'   // ← version を書かない
 }
 
 android {
@@ -28,6 +28,4 @@ android {
   lint { abortOnError false }
 }
 
-dependencies {
-  // 今は空でOK
-}
+dependencies { }
