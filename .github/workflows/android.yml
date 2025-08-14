@@ -4,7 +4,6 @@ on: [push]
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -14,22 +13,35 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # SDKを手動セットアップ（cmdline-tools をDLして PATH に通す）
       - name: Install Android cmdline-tools & SDK packages
+        shell: bash
         run: |
-          set -eux
-          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
-          mkdir -p "$HOME/android-sdk/cmdline-tools"
-          cd "$HOME/android-sdk"
-          curl -sLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
+          set -euxo pipefail
+          export ANDROID_SDK_ROOT="$HOME/android-sdk"
+          export ANDROID_HOME="$ANDROID_SDK_ROOT"
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          cd "$ANDROID_SDK_ROOT"
+          curl -fsSLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q cmdline-tools.zip -d cmdline-tools
-          mv cmdline-tools/cmdline-tools cmdline-tools/latest
-          echo "$HOME/android-sdk/cmdline-tools/latest/bin" >> $GITHUB_PATH
-          echo "$HOME/android-sdk/platform-tools" >> $GITHUB_PATH
-          yes | sdkmanager --licenses
-          yes | sdkmanager "platform-tools" "platforms;android-33" "build-tools;33.0.2"
 
-      # ラッパー無しでGradleを起動（公式アクションがGradleを用意してくれます）
+          if [ -d cmdline-tools/cmdline-tools/bin ]; then
+            src="cmdline-tools/cmdline-tools"
+          elif [ -d cmdline-tools/bin ]; then
+            src="cmdline-tools"
+          else
+            echo "cmdline-tools展開に失敗" >&2; exit 1
+          fi
+          mkdir -p cmdline-tools/latest
+          mv "$src"/* cmdline-tools/latest/
+          rm -rf cmdline-tools/cmdline-tools || true
+
+          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+
+          SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses
+          yes | "$SDKM" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+
       - name: Build with Gradle
         uses: gradle/gradle-build-action@v3
         with:
