@@ -1,68 +1,54 @@
 name: Build APK
-on: [push]
+
+on:
+  push:
+    branches:
+      - main
 
 jobs:
   build:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Set up job
+        run: echo "Starting build..."
+
+      - name: Checkout code
+        uses: actions/checkout@v4
 
       - name: Setup JDK 17
         uses: actions/setup-java@v4
         with:
-          distribution: temurin
-          java-version: 17
+          java-version: '17'
+          distribution: 'temurin'
 
-      - name: Install Android cmdline-tools & SDK packages (no-fail)
+      - name: Install Android cmdline-tools & SDK packages
         shell: bash
         run: |
-          # 失敗で止めない（Broken pipe対策）
-          set +e
+          echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
+          echo "ANDROID_HOME=$HOME/android-sdk" >> $GITHUB_ENV
 
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
+
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           cd "$ANDROID_SDK_ROOT"
-
           curl -fsSLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q cmdline-tools.zip -d cmdline-tools
+          mv cmdline-tools/cmdline-tools cmdline-tools/latest
+          rm cmdline-tools.zip
 
-          if [ -d cmdline-tools/cmdline-tools/bin ]; then
-            src="cmdline-tools/cmdline-tools"
-          elif [ -d cmdline-tools/bin ]; then
-            src="cmdline-tools"
-          else
-            echo "cmdline-tools 展開に失敗"; exit 0
-          fi
-          mkdir -p cmdline-tools/latest
-          mv "$src"/* cmdline-tools/latest/ || true
-          rm -rf cmdline-tools/cmdline-tools || true
-
-          echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
-          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
-
-          SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-
-          # ここは失敗しても無視
-          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
-
-          # パッケージも失敗で止めず、順に入れる
-          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "platform-tools"          || true
-          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "platforms;android-33"   || true
-          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "build-tools;33.0.2"     || true
-
-          # 念のため配置確認（存在しなければ後工程で失敗する）
-          ls -l "$ANDROID_SDK_ROOT/platforms/android-33"/android.jar || true
-          ls -l "$ANDROID_SDK_ROOT/build-tools/33.0.2"/aapt2         || true
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --licenses
+          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
 
       - name: Build with Gradle
-        uses: gradle/gradle-build-action@v3
-        with:
-          gradle-version: 8.7
-          arguments: :app:assembleDebug
+        run: ./gradlew assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: app-debug.apk
+          path: app/build/outputs/apk/debug/app-debug.apk
