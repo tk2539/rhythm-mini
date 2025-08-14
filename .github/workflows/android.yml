@@ -13,14 +13,17 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Install Android cmdline-tools & SDK packages
+      - name: Install Android cmdline-tools & SDK packages (no-fail)
         shell: bash
         run: |
-          set -euxo pipefail
+          # 失敗で止めない（Broken pipe対策）
+          set +e
+
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           cd "$ANDROID_SDK_ROOT"
+
           curl -fsSLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q cmdline-tools.zip -d cmdline-tools
 
@@ -29,18 +32,28 @@ jobs:
           elif [ -d cmdline-tools/bin ]; then
             src="cmdline-tools"
           else
-            echo "cmdline-tools展開に失敗" >&2; exit 1
+            echo "cmdline-tools 展開に失敗"; exit 0
           fi
           mkdir -p cmdline-tools/latest
-          mv "$src"/* cmdline-tools/latest/
+          mv "$src"/* cmdline-tools/latest/ || true
           rm -rf cmdline-tools/cmdline-tools || true
 
           echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
           echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
 
           SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKM" --licenses
-          yes | "$SDKM" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+
+          # ここは失敗しても無視
+          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
+
+          # パッケージも失敗で止めず、順に入れる
+          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "platform-tools"          || true
+          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "platforms;android-33"   || true
+          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "build-tools;33.0.2"     || true
+
+          # 念のため配置確認（存在しなければ後工程で失敗する）
+          ls -l "$ANDROID_SDK_ROOT/platforms/android-33"/android.jar || true
+          ls -l "$ANDROID_SDK_ROOT/build-tools/33.0.2"/aapt2         || true
 
       - name: Build with Gradle
         uses: gradle/gradle-build-action@v3
@@ -53,4 +66,3 @@ jobs:
         with:
           name: app-debug
           path: app/build/outputs/apk/debug/*.apk
-# retry
