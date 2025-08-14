@@ -16,7 +16,7 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      # Android SDK を対話なしで用意（失敗無視＋リトライ付き）
+      # --- Android SDK (対話なし・失敗無視＋リトライ) ---
       - name: Install Android cmdline-tools & SDK packages (robust)
         shell: bash
         run: |
@@ -40,7 +40,7 @@ jobs:
 
           SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
-          # 事前ライセンス（対話なし）
+          # 事前ライセンス配置（対話なし）
           mkdir -p "$ANDROID_SDK_ROOT/licenses"
           cat > "$ANDROID_SDK_ROOT/licenses/android-sdk-license" <<'EOF'
           d56f5187479451eabf01fb78af6dfcb131a6481e
@@ -56,23 +56,40 @@ jobs:
             "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || true
           done
 
-      # Gradle が SDK を確実に見つけられるように sdk.dir を明示
+      # Gradle が SDK の場所を確実に知るように sdk.dir を作成
       - name: Write local.properties (sdk.dir)
         shell: bash
         run: |
           echo "sdk.dir=$HOME/android-sdk" > local.properties
           cat local.properties
 
-      # ========= ここが“Wrapper不要版” =========
-      - name: Build with Gradle (no wrapper)
-        uses: gradle/gradle-build-action@v3
+      # --- Gradle 8.7 をDLして wrapper を生成（wrapper未同梱対策の決定版） ---
+      - name: Prepare Gradle wrapper 8.7
+        shell: bash
+        run: |
+          set -eux
+          curl -fsSLo /tmp/gradle.zip https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          mkdir -p $HOME/gradle && unzip -q /tmp/gradle.zip -d $HOME/gradle
+          $HOME/gradle/gradle-8.7/bin/gradle --version
+          # このプロジェクト内に wrapper を生成
+          $HOME/gradle/gradle-8.7/bin/gradle wrapper --gradle-version 8.7
+          ls -la gradlew gradle/wrapper || true
+
+      # --- ビルド。ログは必ず build.log に保存（失敗しても後で見れる） ---
+      - name: Build with Gradle (capture log)
+        shell: bash
+        run: |
+          set -e
+          chmod +x ./gradlew
+          ./gradlew :app:assembleDebug --stacktrace --warning-mode all --info 2>&1 | tee build.log
+          ls -l app/build/outputs/apk/debug || true
+
+      - name: Upload Gradle log
+        if: always()   # 失敗しても必ずアップロード
+        uses: actions/upload-artifact@v4
         with:
-          gradle-version: 8.7
-          arguments: >
-            :app:assembleDebug
-            --stacktrace
-            --warning-mode all
-            --info
+          name: gradle-build-log
+          path: build.log
 
       - name: Upload APK
         if: success()
