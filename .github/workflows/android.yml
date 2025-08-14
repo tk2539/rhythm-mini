@@ -16,21 +16,22 @@ jobs:
           distribution: temurin
           java-version: 17
 
-      - name: Install Android cmdline-tools & SDK packages
+      # === Android SDK を対話なしで準備（必ず通す） ===
+      - name: Install Android cmdline-tools & SDK packages (no prompts, no fail)
         shell: bash
         run: |
-          set -e
-          # 環境変数をジョブ全体に永続化
+          set +e  # このステップ内では失敗で止めない
+
+          # SDK ルートをジョブ全体に共有
           echo "ANDROID_SDK_ROOT=$HOME/android-sdk" >> $GITHUB_ENV
           echo "ANDROID_HOME=$HOME/android-sdk"      >> $GITHUB_ENV
 
           export ANDROID_SDK_ROOT="$HOME/android-sdk"
           export ANDROID_HOME="$ANDROID_SDK_ROOT"
-
           mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
           cd "$ANDROID_SDK_ROOT"
 
-          # cmdline-tools 取得＆配置
+          # 1) cmdline-tools を取得・配置
           curl -fsSLo cmdline-tools.zip https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
           unzip -q cmdline-tools.zip -d cmdline-tools
           if [ -d cmdline-tools/cmdline-tools/bin ]; then
@@ -39,26 +40,35 @@ jobs:
             src="cmdline-tools"
           fi
           mkdir -p cmdline-tools/latest
-          mv "$src"/* cmdline-tools/latest/ || true
+          mv "$src"/* cmdline-tools/latest/ 2>/dev/null || true
           rm -rf cmdline-tools/cmdline-tools cmdline-tools.zip || true
 
-          # PATH 追加（次ステップでも有効）
           echo "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin" >> $GITHUB_PATH
           echo "$ANDROID_SDK_ROOT/platform-tools"           >> $GITHUB_PATH
 
           SDKM="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
-          # ★ ここは時々 Broken pipe で1を返すので “無視” するのがコツ
-          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" --licenses || true
+          # 2) ライセンスを事前承認（ハッシュを配置：対話不要・Broken pipe回避）
+          mkdir -p "$ANDROID_SDK_ROOT/licenses"
+          cat > "$ANDROID_SDK_ROOT/licenses/android-sdk-license" <<'EOF'
+          d56f5187479451eabf01fb78af6dfcb131a6481e
+          24333f8a63b6825ea9c5514f83c2829b004d1fee
+          EOF
+          cat > "$ANDROID_SDK_ROOT/licenses/android-sdk-preview-license" <<'EOF'
+          84831b9409646a918e30573bab4c9c91346d8abd
+          EOF
 
-          # 必須パッケージをインストール（失敗時は止める）
-          yes | "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "platform-tools" "platforms;android-33" "build-tools;33.0.2"
+          # 3) 必須パッケージを順にインストール（各々リトライ & 失敗無視）
+          for p in "platform-tools" "platforms;android-33" "build-tools;33.0.2"; do
+            "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || \
+            "$SDKM" --sdk_root="$ANDROID_SDK_ROOT" "$p" || true
+          done
 
-          # 確認（ログ用）
-          ls -l "$ANDROID_SDK_ROOT/platforms/android-33"/android.jar
-          ls -l "$ANDROID_SDK_ROOT/build-tools/33.0.2"/aapt2
+          # 4) ログ確認だけ（無くても次で失敗するのでOK）
+          ls -l "$ANDROID_SDK_ROOT/platforms/android-33"/android.jar 2>/dev/null || true
+          ls -l "$ANDROID_SDK_ROOT/build-tools/33.0.2"/aapt2       2>/dev/null || true
 
-      # Gradleラッパー無しで公式アクションに実行させる
+      # === ビルド（Gradle公式アクション） ===
       - name: Build with Gradle
         uses: gradle/gradle-build-action@v3
         with:
